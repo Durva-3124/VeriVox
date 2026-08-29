@@ -1,0 +1,64 @@
+# VeriVox — consolidated dependencies for all Python services
+# (ingestion/, datasets/, model/, backend/)
+#
+# Python 3.10+ required (3.13 used in Module 2 dev — see note below)
+#
+# Install:
+#   pip install -r requirements.txt
+#
+# NOTE (2026-08-29): Baseline bumped to match Module 2's tested environment
+# (Durva). This supersedes the older numpy<1.27 / librosa==0.10.1 / numba<=0.59
+# pins that ingestion/, datasets/, and backend/ originally shipped with —
+# those were incompatible with numpy 2.x. If your local module still imports
+# against the old pins, re-test against this file before merging your branch.
+#
+# torch/torchaudio here are CPU-only wheels (for Docker/CI). For local GPU
+# dev, install torch/torchaudio separately from the CUDA index first, then
+# run this file with --no-deps on those two lines.
+
+# ============================================================
+# Core numerics (shared baseline — do not diverge per-module)
+# ============================================================
+numpy==2.5.0
+scipy==1.18.1
+
+# ============================================================
+# Module 1 — Ingestion, Windowing & VAD (Trisha)
+# ============================================================
+sounddevice
+pydub
+webrtcvad
+ffmpeg-python
+
+# ============================================================
+# Datasets & Evaluation (Harsh)
+# ============================================================
+# (audio I/O covered by librosa/soundfile below; add dataset-specific
+#  tooling here as it's introduced, e.g. pandas for manifest handling)
+pandas
+
+# ============================================================
+# Module 2 — DL & Feature Engine + Speaker Verification (Durva)
+# ============================================================
+torch==2.12.1
+torchaudio==2.11.0
+speechbrain==1.1.1
+onnxruntime==1.29.0
+onnxscript==0.7.1
+soundfile==0.14.0          # replaces torchaudio.load (requires torchcodec in 2.9+)
+librosa==1.0.0              # shared audio-feature lib — also used by ingestion/datasets
+praat-parselmouth==0.4.7
+
+# ============================================================
+# Module 3 + 5 — Risk Scoring, Policy, API (Atharv)
+# ============================================================
+fastapi==0.110.0
+uvicorn==0.27.1
+websockets
+twilio
+sendgrid
+grpcio                      # pitch-level API stub only
+
+# ============================================================
+# Frontend build tooling is separate — see frontend/package.json (Node/npm)
+# ============================================================
