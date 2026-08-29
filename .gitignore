@@ -60,3 +60,4 @@ datasets/processed/dummy_audio/
 # Misc
 *.sqlite3
 .amazonq/
+.ain/
