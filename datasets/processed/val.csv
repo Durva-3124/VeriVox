@@ -1,0 +1,11 @@
+filepath,label
+C:\Users\Dell\Desktop\VeriVox\datasets\processed\dummy_audio\val_000_bonafide.wav,0
+C:\Users\Dell\Desktop\VeriVox\datasets\processed\dummy_audio\val_001_spoof.wav,1
+C:\Users\Dell\Desktop\VeriVox\datasets\processed\dummy_audio\val_002_bonafide.wav,0
+C:\Users\Dell\Desktop\VeriVox\datasets\processed\dummy_audio\val_003_spoof.wav,1
+C:\Users\Dell\Desktop\VeriVox\datasets\processed\dummy_audio\val_004_bonafide.wav,0
+C:\Users\Dell\Desktop\VeriVox\datasets\processed\dummy_audio\val_005_spoof.wav,1
+C:\Users\Dell\Desktop\VeriVox\datasets\processed\dummy_audio\val_006_bonafide.wav,0
+C:\Users\Dell\Desktop\VeriVox\datasets\processed\dummy_audio\val_007_spoof.wav,1
+C:\Users\Dell\Desktop\VeriVox\datasets\processed\dummy_audio\val_008_bonafide.wav,0
+C:\Users\Dell\Desktop\VeriVox\datasets\processed\dummy_audio\val_009_spoof.wav,1
