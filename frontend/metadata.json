@@ -1,0 +1,6 @@
+{
+  "name": "VeriVox - Multilingual AI Voice Impersonation Defense",
+  "description": "Real-time acoustic fraud mitigation and synthetic voice-clone detection platform defending against deepfake impersonation in Indian regional languages (SIH26104).",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
