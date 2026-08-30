@@ -38,6 +38,8 @@ logs/
 Thumbs.db
 .vscode/
 .idea/
+.cursor/
+.cursorrules
 
 # Data / artifacts
 data/
