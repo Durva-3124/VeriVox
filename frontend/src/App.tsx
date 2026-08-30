@@ -1,8 +1,18 @@
 import React, { Suspense, lazy, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Radio } from 'lucide-react';
 import { LandingPage } from './views/LandingPage';
 import { WorkspaceLayout } from './layouts/WorkspaceLayout';
+
+function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [pathname]);
+
+  return null;
+}
 
 // Lazy-loaded workspace route views for optimized bundle loading
 const LiveDashboardView = lazy(() => import('./views/LiveDashboardView').then(m => ({ default: m.LiveDashboardView })));
@@ -37,6 +47,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <ScrollToTop />
       <Routes>
         {/* Public Landing View (No Sidebar, Full-Width) */}
         <Route path="/" element={<LandingPage />} />
