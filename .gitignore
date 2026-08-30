@@ -45,6 +45,10 @@ raw_data/
 artifacts/
 models/
 
+# Keep the frontend mock data in version control
+!frontend/src/data/
+!frontend/src/data/mockData.ts
+
 # Model checkpoints and ONNX exports (large binaries — do not commit)
 model/training/checkpoints/*.pt
 model/training/checkpoints/*.pth
