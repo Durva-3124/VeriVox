@@ -38,6 +38,8 @@ from datasets.evaluation.metrics import compute_metrics_summary
 
 log = logging.getLogger(__name__)
 
+_ROOT = Path(__file__).resolve().parent.parent.parent
+
 
 # Standard stress-test condition definitions
 STRESS_CONDITIONS: dict[str, dict[str, Any]] = {
@@ -149,12 +151,14 @@ class AdversarialTester:
         scores: list[float] = []
 
         for s in samples:
-            filepath = s["filepath"]
+            fp = Path(s["filepath"])
+            if not fp.is_absolute():
+                fp = _ROOT / fp
             label = int(s["label"])
-            if not Path(filepath).exists():
+            if not fp.exists():
                 continue
 
-            audio, sr = sf.read(filepath, dtype="float32")
+            audio, sr = sf.read(str(fp), dtype="float32")
             if audio.ndim > 1:
                 audio = audio.mean(axis=1)
 

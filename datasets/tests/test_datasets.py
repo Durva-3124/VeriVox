@@ -210,3 +210,49 @@ def test_aasist_onnx_model_runner(dummy_audio_clip):
     prob = runner.predict_spoof_prob(audio, sr=sr)
     assert isinstance(prob, float)
     assert 0.0 <= prob <= 1.0
+
+
+# ===========================================================================
+# 6. Manifest Path Portability & Split Auditing Tests
+# ===========================================================================
+
+def test_manifest_csvs_use_relative_paths():
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    manifest_dirs = [
+        repo_root / "datasets" / "manifests",
+        repo_root / "datasets" / "processed",
+    ]
+    csv_files = []
+    for d in manifest_dirs:
+        if d.exists():
+            csv_files.extend(list(d.glob("*.csv")))
+
+    assert len(csv_files) > 0, "No manifest CSVs found to test"
+    for csv_file in csv_files:
+        with open(csv_file, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row_idx, row in enumerate(reader):
+                fp = row.get("filepath", "")
+                assert fp, f"Row {row_idx} in {csv_file.name} missing filepath"
+                assert not Path(fp).is_absolute(), (
+                    f"Found absolute path '{fp}' in {csv_file.relative_to(repo_root)}"
+                )
+                assert "HARSH" not in fp, f"Found hardcoded user path '{fp}' in {csv_file.name}"
+                # Verify file actually exists relative to repo root
+                resolved_file = repo_root / fp
+                assert resolved_file.exists(), (
+                    f"Referenced audio file '{fp}' in {csv_file.name} does not exist at {resolved_file}"
+                )
+
+
+def test_audit_splits_with_relative_paths():
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    train_csv = repo_root / "datasets" / "manifests" / "asvspoof2019_la_train.csv"
+    val_csv = repo_root / "datasets" / "manifests" / "asvspoof2019_la_val.csv"
+    eval_csv = repo_root / "datasets" / "manifests" / "asvspoof2019_la_eval.csv"
+
+    if train_csv.exists() and val_csv.exists():
+        summary = audit_splits(train_csv, val_csv, eval_csv, check_audio_files=True)
+        assert summary["status"] == "PASSED"
+        assert summary["missing_files_count"] == 0
+        assert summary["speaker_disjoint"] is True

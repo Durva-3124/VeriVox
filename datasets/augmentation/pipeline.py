@@ -158,18 +158,33 @@ class CodecAugmentationPipeline:
         augmented_rows = []
         log.info("Starting offline codec augmentation for %d files in %s", len(reader), in_csv)
 
+        def to_rel_str(p: Path) -> str:
+            resolved = p.resolve()
+            try:
+                return resolved.relative_to(_ROOT.resolve()).as_posix()
+            except ValueError:
+                return resolved.as_posix()
+
         for i, row in enumerate(reader):
             src_file = Path(row["filepath"])
+            if not src_file.is_absolute():
+                if not src_file.exists() and (_ROOT / src_file).exists():
+                    src_file_resolved = _ROOT / src_file
+                else:
+                    src_file_resolved = src_file
+            else:
+                src_file_resolved = src_file
+
             label = int(row.get("label", 0))
             speaker_id = row.get("speaker_id", "unknown")
             system_id = row.get("system_id", "-")
             attack_type = row.get("attack_type", "bonafide" if label == 0 else "spoof")
 
             # Preserve clean copy if requested
-            if mix_clean and src_file.exists():
+            if mix_clean and src_file_resolved.exists():
                 augmented_rows.append(
                     {
-                        "filepath": str(src_file.resolve()),
+                        "filepath": to_rel_str(src_file_resolved),
                         "label": label,
                         "speaker_id": speaker_id,
                         "system_id": system_id,
@@ -179,19 +194,19 @@ class CodecAugmentationPipeline:
                     }
                 )
 
-            if not src_file.exists():
+            if not src_file_resolved.exists():
                 continue
 
             # Pick a codec transform
             trans_name = random.choice(self.transform_names)
-            out_filename = f"aug_{i:05d}_{trans_name}_{src_file.name}"
+            out_filename = f"aug_{i:05d}_{trans_name}_{src_file_resolved.name}"
             out_filepath = out_dir / out_filename
 
             try:
-                _, used_name = self.augment_file(src_file, out_filepath, transform_name=trans_name)
+                _, used_name = self.augment_file(src_file_resolved, out_filepath, transform_name=trans_name)
                 augmented_rows.append(
                     {
-                        "filepath": str(out_filepath.resolve()),
+                        "filepath": to_rel_str(out_filepath),
                         "label": label,
                         "speaker_id": speaker_id,
                         "system_id": system_id,
@@ -201,7 +216,7 @@ class CodecAugmentationPipeline:
                     }
                 )
             except Exception as e:
-                log.warning("Failed to augment %s: %s", src_file, e)
+                log.warning("Failed to augment %s: %s", src_file_resolved, e)
 
         # Write output manifest
         with open(out_csv, "w", newline="", encoding="utf-8") as f:
