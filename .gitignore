@@ -68,3 +68,4 @@ datasets/processed/augmented_audio/
 # Misc
 *.sqlite3
 .amazonq/
+.ain/
