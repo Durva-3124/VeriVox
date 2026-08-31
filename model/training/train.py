@@ -68,6 +68,7 @@ class SpoofDataset(Dataset):
     Loads audio with soundfile, resamples to 16 kHz mono,
     then pads or crops to CLIP_SAMPLES.
     Resolves relative filepaths against base_dir (defaults to repository root).
+    Also recovers gracefully from foreign absolute paths when files exist relative to base_dir.
     """
 
     def __init__(self, csv_path: str | Path, base_dir: str | Path | None = None) -> None:
@@ -77,10 +78,25 @@ class SpoofDataset(Dataset):
         with open(csv_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                fp = Path(row["filepath"])
-                if not fp.is_absolute():
-                    fp = self.base_dir / fp
-                self.samples.append((str(fp), int(row["label"])))
+                raw_fp = row["filepath"]
+                p = Path(raw_fp)
+                if not p.is_absolute():
+                    resolved = self.base_dir / p
+                elif p.exists():
+                    resolved = p
+                else:
+                    # Foreign absolute path (e.g. from another user's machine C:\Users\Dell\... or C:\Users\HARSH\...)
+                    norm = raw_fp.replace("\\", "/")
+                    if "datasets/" in norm:
+                        rel_subpath = "datasets/" + norm.split("datasets/", 1)[1]
+                        resolved = self.base_dir / rel_subpath
+                    elif "model/" in norm:
+                        rel_subpath = "model/" + norm.split("model/", 1)[1]
+                        resolved = self.base_dir / rel_subpath
+                    else:
+                        resolved = self.base_dir / p.name
+
+                self.samples.append((str(resolved), int(row["label"])))
 
     def __len__(self) -> int:
         return len(self.samples)
