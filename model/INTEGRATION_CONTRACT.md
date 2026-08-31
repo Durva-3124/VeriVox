@@ -93,7 +93,7 @@ Default `--checkpoint_dir` is `model/training/checkpoints/`. Checkpoints written
 Sourced from `inference.py` — key names are fixed, do not rename:
 
 ```python
-from model.inference import run_module2
+from model.inference import run_module2, assemble_segment
 
 result = run_module2(
     waveform,                        # torch.Tensor, (T,) or (1,T), float32, 16kHz

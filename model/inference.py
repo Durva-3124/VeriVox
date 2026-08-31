@@ -123,6 +123,25 @@ def _prosodic_spoof_score(prosodic: dict[str, float]) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Streaming helper
+# ---------------------------------------------------------------------------
+
+def assemble_segment(chunks: list[torch.Tensor]) -> torch.Tensor:
+    """
+    Assemble a list of 200ms chunks into a single segment for run_module2().
+
+    Args:
+        chunks: list of (1, 3200) or (3200,) float32 tensors from ingestion.
+                Typically a rolling deque of 20 chunks = 4 seconds.
+
+    Returns:
+        (1, T) float32 tensor ready to pass as `waveform` to run_module2().
+    """
+    tensors = [c.reshape(1, -1) if c.dim() == 1 else c for c in chunks]
+    return torch.cat(tensors, dim=-1)  # (1, T)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
