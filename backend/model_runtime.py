@@ -95,7 +95,7 @@ class AasistRuntime:
         Returns:
             {
                 "score_acoustic": float in [0.0, 1.0] (class 1 = spoof probability),
-                "embedding": 1D float32 numpy array, shape (192,)
+                "embedding": 1D float32 numpy array, shape (128,)
             }
 
         Raises:
@@ -118,7 +118,7 @@ class AasistRuntime:
         inputs = {"waveform": wav}
         outputs = self.session.run(None, inputs)
 
-        # Output nodes: "logits" shape (1, 2), "embedding" shape (1, 192)
+        # Output nodes: "logits" shape (1, 2), "embedding" shape (1, 128)
         logits = outputs[0]
         embedding = outputs[1]
 
