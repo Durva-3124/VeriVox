@@ -47,9 +47,17 @@ def generate_benchmark_report(
     Runs full evaluation on model_path using eval_csv, generating Markdown & JSON reports.
     """
     m_path = Path(model_path)
+    if not m_path.is_absolute():
+        m_path = _ROOT / m_path
     csv_p = Path(eval_csv)
+    if not csv_p.is_absolute():
+        csv_p = _ROOT / csv_p
     out_md = Path(output_md)
+    if not out_md.is_absolute():
+        out_md = _ROOT / out_md
     out_json = Path(output_json)
+    if not out_json.is_absolute():
+        out_json = _ROOT / out_json
 
     out_md.parent.mkdir(parents=True, exist_ok=True)
     out_json.parent.mkdir(parents=True, exist_ok=True)
@@ -58,6 +66,12 @@ def generate_benchmark_report(
         raise FileNotFoundError(f"Model not found: {m_path}")
     if not csv_p.exists():
         raise FileNotFoundError(f"Eval manifest not found: {csv_p}")
+
+    def to_rel_str(p: Path) -> str:
+        try:
+            return p.resolve().relative_to(_ROOT.resolve()).as_posix()
+        except ValueError:
+            return p.as_posix()
 
     with open(csv_p, "r", newline="", encoding="utf-8") as f:
         samples = list(csv.DictReader(f))
@@ -105,9 +119,9 @@ def generate_benchmark_report(
 
     report_data = {
         "metadata": {
-            "model_path": str(m_path.resolve()),
+            "model_path": to_rel_str(m_path),
             "model_name": m_path.name,
-            "eval_manifest": str(csv_p.resolve()),
+            "eval_manifest": to_rel_str(csv_p),
             "evaluation_timestamp": datetime.now(timezone.utc).isoformat(),
             "total_samples": len(samples),
             "bonafide_samples": clean_metrics["bonafide_count"],

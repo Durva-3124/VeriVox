@@ -25,6 +25,16 @@ import soundfile as sf
 
 log = logging.getLogger(__name__)
 
+_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _normalize_filepath(p: Path) -> str:
+    try:
+        return p.resolve().relative_to(_ROOT.resolve()).as_posix()
+    except ValueError:
+        return p.as_posix()
+
+
 # Known ASVspoof 2019 LA attack systems
 ASVSPOOF2019_LA_ATTACKS = {
     # Seen in Train & Dev (A01 - A06)
@@ -134,7 +144,7 @@ class ASVspoofProtocolParser:
 
                 samples.append(
                     AudioSampleMeta(
-                        filepath=str(full_audio_path.resolve()),
+                        filepath=_normalize_filepath(full_audio_path),
                         label=label,
                         speaker_id=speaker_id,
                         system_id=system_id,
@@ -207,7 +217,7 @@ class ASVspoofProtocolParser:
 
                 samples.append(
                     AudioSampleMeta(
-                        filepath=str(full_audio_path.resolve()),
+                        filepath=_normalize_filepath(full_audio_path),
                         label=label,
                         speaker_id=speaker_id,
                         system_id=system_id,

@@ -47,6 +47,9 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -62,17 +65,22 @@ CLIP_SAMPLES = 64_000   # 4 s × 16 kHz
 class SpoofDataset(Dataset):
     """
     Reads a CSV manifest with columns [filepath, label].
-    Loads audio with torchaudio, resamples to 16 kHz mono,
+    Loads audio with soundfile, resamples to 16 kHz mono,
     then pads or crops to CLIP_SAMPLES.
+    Resolves relative filepaths against base_dir (defaults to repository root).
     """
 
-    def __init__(self, csv_path: str) -> None:
+    def __init__(self, csv_path: str | Path, base_dir: str | Path | None = None) -> None:
         import csv
+        self.base_dir = Path(base_dir) if base_dir is not None else _REPO_ROOT
         self.samples: list[tuple[str, int]] = []
         with open(csv_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                self.samples.append((row["filepath"], int(row["label"])))
+                fp = Path(row["filepath"])
+                if not fp.is_absolute():
+                    fp = self.base_dir / fp
+                self.samples.append((str(fp), int(row["label"])))
 
     def __len__(self) -> int:
         return len(self.samples)

@@ -134,12 +134,14 @@ def generate_benchmark_corpus(
     output_audio_dir: Path,
     num_speakers: int = 14,
     samples_per_speaker: int = 10,
+    root_dir: Path | None = None,
 ) -> list[AudioSampleMeta]:
     """
     Generates a realistic multi-speaker benchmark corpus.
     """
     output_audio_dir.mkdir(parents=True, exist_ok=True)
     all_samples: list[AudioSampleMeta] = []
+    base_root = root_dir if root_dir is not None else _ROOT
 
     seen_attacks = [
         ("A01", "Neural TTS (Tacotron + WaveNet)"),
@@ -187,9 +189,14 @@ def generate_benchmark_corpus(
             filepath = output_audio_dir / filename
             sf.write(str(filepath), audio, SAMPLE_RATE)
 
+            try:
+                rel_filepath = filepath.resolve().relative_to(base_root.resolve()).as_posix()
+            except ValueError:
+                rel_filepath = filepath.as_posix()
+
             all_samples.append(
                 AudioSampleMeta(
-                    filepath=str(filepath.resolve()),
+                    filepath=rel_filepath,
                     label=label,
                     speaker_id=speaker_id,
                     system_id=system_id,

@@ -1,6 +1,6 @@
 # VeriVox Model Evaluation & Adversarial Report
 **Module:** Datasets & Evaluation | **Owner:** Harsh | **Model:** `aasist.onnx`
-**Evaluation Timestamp:** 2026-08-31T09:20:51.385631+00:00 UTC
+**Evaluation Timestamp:** 2026-08-31T15:52:31.546125+00:00 UTC
 
 ---
 
@@ -51,11 +51,11 @@
 | `amr_nb` | AMR-NB Cellular (8 kHz 4.75kbps) | 80.0% | +0.0% | 0.0174 | 46.7% |
 | `amr_wb` | AMR-WB HD Voice (16 kHz 12.65kbps) | 80.0% | +0.0% | 0.0174 | 20.0% |
 | `gsm` | GSM Full Rate (2G Telephony) | 80.0% | +0.0% | 0.0174 | 43.3% |
-| `packet_loss_10` | VoIP Packet Loss (10% Burst) | 80.0% | +0.0% | 0.0174 | 26.7% |
-| `packet_loss_20` | VoIP Packet Loss (20% Heavy Burst) | 80.0% | +0.0% | 0.0174 | 26.7% |
-| `noise_snr_15` | Additive Background Noise (15 dB SNR) | 80.0% | +0.0% | 0.0174 | 13.3% |
-| `noise_snr_5` | Severe Background Noise (5 dB SNR) | 80.0% | +0.0% | 0.0174 | 10.0% |
-| `reverb_rir` | Room Reverberation (RT60=0.3s Replay) | 80.0% | +0.0% | 0.0174 | 26.7% |
+| `packet_loss_10` | VoIP Packet Loss (10% Burst) | 80.0% | +0.0% | 0.0174 | 36.7% |
+| `packet_loss_20` | VoIP Packet Loss (20% Heavy Burst) | 80.0% | +0.0% | 0.0174 | 33.3% |
+| `noise_snr_15` | Additive Background Noise (15 dB SNR) | 80.0% | +0.0% | 0.0174 | 16.7% |
+| `noise_snr_5` | Severe Background Noise (5 dB SNR) | 80.0% | +0.0% | 0.0174 | 13.3% |
+| `reverb_rir` | Room Reverberation (RT60=0.3s Replay) | 80.0% | +0.0% | 0.0174 | 23.3% |
 | `adversarial_evasion` | Adversarial Acoustic Perturbation | 80.0% | +0.0% | 0.0174 | 13.3% |
 
 ---

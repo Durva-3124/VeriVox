@@ -55,15 +55,21 @@ def make_split(
     csv_path: Path,
     count: int,
     prefix: str,
+    repo_root: Path | None = None,
 ) -> None:
     rows: list[dict] = []
+    base_root = repo_root if repo_root is not None else Path(__file__).resolve().parent.parent.parent
     for i in range(count):
         label = i % 2          # alternating bonafide/spoof
         freq  = 220 + i * 30   # different tone per file
         samples = _sine(freq, N_SAMPLES) if label == 0 else _noise(N_SAMPLES)
         fname = audio_dir / f"{prefix}_{i:03d}_{'bonafide' if label==0 else 'spoof'}.wav"
         _write_wav(fname, samples)
-        rows.append({"filepath": str(fname.resolve()), "label": label})
+        try:
+            rel_fname = fname.resolve().relative_to(base_root.resolve()).as_posix()
+        except ValueError:
+            rel_fname = fname.as_posix()
+        rows.append({"filepath": rel_fname, "label": label})
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["filepath", "label"])
@@ -76,11 +82,12 @@ def make_split(
 if __name__ == "__main__":
     random.seed(0)
     root      = Path(__file__).resolve().parent
+    repo_root = root.parent.parent
     audio_dir = root / "dummy_audio"
     audio_dir.mkdir(exist_ok=True)
 
-    make_split(audio_dir, root / "train.csv", TRAIN_COUNT, "train")
-    make_split(audio_dir, root / "val.csv",   VAL_COUNT,   "val")
+    make_split(audio_dir, root / "train.csv", TRAIN_COUNT, "train", repo_root)
+    make_split(audio_dir, root / "val.csv",   VAL_COUNT,   "val", repo_root)
     print("Done. Run training with:")
     print("  python model/training/train.py --model rawnet2 "
           "--train_csv datasets/processed/train.csv "
