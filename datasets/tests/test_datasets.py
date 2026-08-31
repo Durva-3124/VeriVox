@@ -257,3 +257,27 @@ def test_audit_splits_with_relative_paths():
         assert summary["status"] == "PASSED"
         assert summary["missing_files_count"] == 0
         assert summary["speaker_disjoint"] is True
+
+
+def test_spoof_dataset_path_resolution(tmp_path):
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    csv_rel = tmp_path / "rel.csv"
+    with open(csv_rel, "w", newline="", encoding="utf-8") as f:
+        f.write("filepath,label\ndatasets/processed/benchmark_audio/LA_0005_000_bonafide.wav,0\n")
+
+    csv_abs = tmp_path / "foreign_abs.csv"
+    with open(csv_abs, "w", newline="", encoding="utf-8") as f:
+        f.write("filepath,label\nC:\\Users\\OtherUser\\Desktop\\VeriVox\\datasets\\processed\\benchmark_audio\\LA_0005_000_bonafide.wav,0\n")
+
+    try:
+        from model.training.train import SpoofDataset
+        ds_rel = SpoofDataset(csv_rel, base_dir=repo_root)
+        assert len(ds_rel) == 1
+        expected_path = str(repo_root / "datasets/processed/benchmark_audio/LA_0005_000_bonafide.wav")
+        assert ds_rel.samples[0][0] == expected_path
+
+        ds_abs = SpoofDataset(csv_abs, base_dir=repo_root)
+        assert len(ds_abs) == 1
+        assert ds_abs.samples[0][0] == expected_path
+    except ImportError:
+        pass
