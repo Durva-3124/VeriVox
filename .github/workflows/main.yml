@@ -29,6 +29,8 @@ jobs:
       - name: Generate benchmark dataset & manifests
         run: |
           python datasets/generate_benchmark_data.py
+          python -m datasets.augmentation.pipeline --input_csv datasets/manifests/asvspoof2019_la_train.csv --output_dir datasets/processed/augmented_audio --output_csv datasets/manifests/codec_augmented_train.csv
+          python -m datasets.augmentation.pipeline --input_csv datasets/manifests/asvspoof2019_la_val.csv --output_dir datasets/processed/augmented_audio --output_csv datasets/manifests/codec_augmented_val.csv
 
       - name: Verify Speaker-Disjoint Splits
         run: |
