@@ -11,19 +11,26 @@ from __future__ import annotations
 import logging
 from typing import Dict, Optional, Any
 
-import torch
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 from backend.schemas import decode_pcm_b64
-from model.speaker_verification import enroll_speaker
+
+try:
+    import torch
+    from model.speaker_verification import enroll_speaker
+    TORCH_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):
+    torch = None
+    enroll_speaker = None
+    TORCH_AVAILABLE = False
 
 log = logging.getLogger("verivox.enrollment")
 
 router = APIRouter(prefix="/api/v1/speaker", tags=["speaker"])
 
-# In-memory speaker profile store: caller_id -> 192-dim ECAPA-TDNN torch.Tensor
-ENROLLED_SPEAKERS: Dict[str, torch.Tensor] = {}
+# In-memory speaker profile store: caller_id -> 192-dim ECAPA-TDNN embedding
+ENROLLED_SPEAKERS: Dict[str, Any] = {}
 
 
 class EnrollRequest(BaseModel):
@@ -38,7 +45,7 @@ class EnrollResponse(BaseModel):
     enrolled: bool
 
 
-def get_enrolled_embedding(caller_id: str) -> Optional[torch.Tensor]:
+def get_enrolled_embedding(caller_id: str) -> Optional[Any]:
     """Retrieve 192-dim enrolled speaker embedding if caller_id is registered."""
     return ENROLLED_SPEAKERS.get(caller_id)
 
@@ -59,6 +66,11 @@ async def enroll_speaker_endpoint(payload: EnrollRequest) -> Dict[str, Any]:
     Enrolls a speaker by extracting a 192-dimensional ECAPA-TDNN embedding
     from the provided base64 PCM audio waveform.
     """
+    if not TORCH_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Speaker enrollment unavailable: PyTorch or SpeechBrain is not installed in this environment."
+        )
     if not payload.caller_id.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

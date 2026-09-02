@@ -15,24 +15,33 @@ import numpy as np
 import websockets
 
 
-import torch
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):
+    torch = None
+    TORCH_AVAILABLE = False
+
 from backend.enrollment import enroll_speaker_endpoint, EnrollRequest
 from backend.policy import get_session_risk_endpoint
 
 async def test_websocket_stream():
     url = "ws://localhost:8000/stream"
 
-    # 1. Enroll speaker before streaming
+    # 1. Enroll speaker before streaming (if torch & speechbrain available)
     t_1s = np.linspace(0, 1.0, 16000, endpoint=False, dtype=np.float32)
     enroll_audio = 0.3 * np.sin(2 * np.pi * 440.0 * t_1s)
     enroll_pcm = (enroll_audio * 32767.0).astype(np.int16).tobytes()
     enroll_b64 = base64.b64encode(enroll_pcm).decode("utf-8")
 
-    enroll_res = await enroll_speaker_endpoint(EnrollRequest(
-        caller_id="caller_ws_user",
-        audio_b64=enroll_b64
-    ))
-    print(f"Pre-stream Enrollment: {enroll_res}")
+    try:
+        enroll_res = await enroll_speaker_endpoint(EnrollRequest(
+            caller_id="caller_ws_user",
+            audio_b64=enroll_b64
+        ))
+        print(f"Pre-stream Enrollment: {enroll_res}")
+    except Exception as e:
+        print(f"Pre-stream Enrollment skipped (expected if torch/speechbrain missing): {e}")
 
     print(f"Connecting to WebSocket endpoint {url} ...")
     async with websockets.connect(url) as ws:

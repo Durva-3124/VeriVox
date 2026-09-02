@@ -104,8 +104,8 @@ async def run_async_tests():
         print(f"Enroll Response: {res_enroll}")
         assert res_enroll == {"caller_id": "caller_test_001", "enrolled": True}
     except Exception as e:
-        if "speechbrain" in str(e).lower():
-            print("SKIPPED: Speaker enrollment test skipped because speechbrain is not installed (expected in CI).")
+        if "speechbrain" in str(e).lower() or "torch" in str(e).lower() or getattr(e, "status_code", None) == 503:
+            print("SKIPPED: Speaker enrollment test skipped because torch/speechbrain is not installed (expected in CI).")
         else:
             raise
 

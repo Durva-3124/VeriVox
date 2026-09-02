@@ -19,7 +19,6 @@ import logging
 import time
 from typing import Dict, Any, Optional
 
-import torch
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -31,7 +30,16 @@ from backend.policy import router as policy_router, update_session_risk
 from backend.risk import RiskScorer, is_acoustic_spoof
 from backend.schemas import AudioChunk, RiskUpdate
 from backend.session import router as session_router
-from model.speaker_verification import enroll_speaker, score_speaker
+
+try:
+    import torch
+    from model.speaker_verification import enroll_speaker, score_speaker
+    TORCH_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):
+    torch = None
+    enroll_speaker = None
+    score_speaker = None
+    TORCH_AVAILABLE = False
 
 logging.basicConfig(
     level=logging.INFO,
