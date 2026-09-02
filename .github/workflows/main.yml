@@ -1,0 +1,64 @@
+name: VeriVox CI
+
+on:
+  push:
+    branches: [ main, "feature/**" ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  python-test:
+    name: Python Test Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy soundfile onnxruntime scikit-learn pytest fastapi pydantic uvicorn websockets
+
+      - name: Generate benchmark dataset & manifests
+        run: |
+          python datasets/generate_benchmark_data.py
+          python -m datasets.augmentation.pipeline --input_csv datasets/manifests/asvspoof2019_la_train.csv --output_dir datasets/processed/augmented_audio --output_csv datasets/manifests/codec_augmented_train.csv
+          python -m datasets.augmentation.pipeline --input_csv datasets/manifests/asvspoof2019_la_val.csv --output_dir datasets/processed/augmented_audio --output_csv datasets/manifests/codec_augmented_val.csv
+
+      - name: Verify Speaker-Disjoint Splits
+        run: |
+          python datasets/splits/verify_splits.py
+
+      - name: Run Backend Contracts Verification
+        run: |
+          python backend/test_backend.py
+
+      - name: Run Datasets & Evaluation Pytest Suite
+        run: |
+          python -m pytest datasets/tests/test_datasets.py -v
+
+  frontend-check:
+    name: Frontend Build Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install and Build Frontend
+        working-directory: frontend
+        run: |
+          npm ci || npm install
+          npm run build
