@@ -14,6 +14,19 @@ import numpy as np
 
 from backend.model_runtime import is_mismatch
 
+# Calibrated against synthetic benchmark audio (datasets/processed/benchmark_audio/),
+# NOT real ASVspoof recordings — never present as validated real-world accuracy in code comments, logs, or response fields.
+ACOUSTIC_OPERATING_THRESHOLD: float = 0.3998
+
+
+def is_acoustic_spoof(acoustic_score: float) -> bool:
+    """
+    Evaluates whether raw or smoothed acoustic spoof score meets or exceeds
+    the calibrated synthetic benchmark operating threshold.
+    """
+    return acoustic_score >= ACOUSTIC_OPERATING_THRESHOLD
+
+
 
 class RiskScorer:
     """

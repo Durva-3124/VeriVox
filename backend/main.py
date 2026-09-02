@@ -1,24 +1,36 @@
 """
 FastAPI Real-Time Voice Cloning Impersonation Detection Backend for VeriVox (Module 3).
 
+Note: Install dependencies from the repository root requirements.txt only (`pip install -r requirements.txt`).
+
 Provides:
   - GET /health: Status & ONNX model readiness check
   - WS /stream: WebSocket endpoint for continuous 200ms audio chunk evaluation
+  - POST /api/v1/speaker/enroll: Speaker profile registration endpoint
+  - POST /api/v1/policy/escalate: Step-up authentication trigger (stub)
+  - POST /api/v1/transaction/freeze: Transaction freeze trigger (stub)
+  - GET /api/v1/session/{id}/risk: Real-time session risk state lookup
+  - POST /api/v1/policy/alert: Policy alert dispatcher (SMS & Email stubs)
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
+import torch
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from backend.alerts import router as alerts_router
+from backend.enrollment import router as enrollment_router, is_enrolled, get_enrolled_embedding
 from backend.model_runtime import aasist_runtime
-from backend.risk import RiskScorer
+from backend.policy import router as policy_router, update_session_risk
+from backend.risk import RiskScorer, is_acoustic_spoof
 from backend.schemas import AudioChunk, RiskUpdate
+from model.speaker_verification import enroll_speaker, score_speaker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,6 +54,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount APIRouters for enrollment, policy, and alert modules
+app.include_router(enrollment_router)
+app.include_router(policy_router)
+app.include_router(alerts_router)
+
 
 @app.get("/health")
 async def health_check() -> Dict[str, Any]:
@@ -58,8 +75,8 @@ async def websocket_audio_stream(websocket: WebSocket) -> None:
     WebSocket endpoint for real-time audio chunk stream risk analysis.
 
     Contract:
-      Input : AudioChunk JSON (chunk_id, timestamp_capture_ms, sample_rate, duration_ms, is_speech, audio_b64)
-      Output: RiskUpdate JSON (chunk_id, score_acoustic, score_speaker, risk_score, risk_tier, speaker_mismatch, latency_ms)
+      Input : AudioChunk JSON (chunk_id, timestamp_capture_ms, sample_rate, duration_ms, is_speech, audio_b64, caller_id, session_id)
+      Output: RiskUpdate JSON (chunk_id, score_acoustic, score_speaker, risk_score, risk_tier, speaker_mismatch, latency_ms, is_spoof)
     """
     await websocket.accept()
     log.info("WebSocket connection established with client: %s", websocket.client)
@@ -102,8 +119,12 @@ async def websocket_audio_stream(websocket: WebSocket) -> None:
                     risk_score=risk_score,
                     risk_tier=risk_tier,
                     speaker_mismatch=speaker_mismatch,
-                    latency_ms=latency_ms
+                    latency_ms=latency_ms,
+                    is_spoof=False
                 )
+                if chunk.session_id:
+                    update_session_risk(chunk.session_id, update)
+
                 log.info("Chunk %d [SILENCE] processed in %.2f ms", chunk.chunk_id, latency_ms)
                 await websocket.send_text(update.model_dump_json())
                 continue
@@ -117,38 +138,57 @@ async def websocket_audio_stream(websocket: WebSocket) -> None:
                 await websocket.send_json({"error": f"Inference failed: {infer_err}"})
                 continue
 
-            # 5. Evaluate Risk & Speaker Consistency
-            # Note: score_speaker is currently None (no enrollment endpoint active yet)
-            score_speaker = None
+            # 5. Speaker Verification (ECAPA-TDNN 192-dim vector)
+            score_speaker_val: Optional[float] = None
+            if chunk.caller_id and is_enrolled(chunk.caller_id):
+                try:
+                    enrolled_emb = get_enrolled_embedding(chunk.caller_id)
+                    if enrolled_emb is not None:
+                        wav_tensor = torch.from_numpy(waveform)
+                        live_emb = enroll_speaker([wav_tensor])
+                        score_speaker_val = score_speaker(live_emb, enrolled_emb)
+                except Exception as spk_err:
+                    log.warning("Speaker verification failed for chunk %d: %s", chunk.chunk_id, spk_err)
+                    score_speaker_val = None
+
+            # 6. Evaluate Risk & Speaker Consistency
             risk_score, risk_tier, speaker_mismatch = risk_scorer.score_chunk(
                 acoustic=score_acoustic,
-                speaker=score_speaker
+                speaker=score_speaker_val
             )
+
+            is_spoof = is_acoustic_spoof(score_acoustic)
 
             # Measure processing latency prior to network socket send
             t_end = time.perf_counter()
             latency_ms = round((t_end - t_start) * 1000.0, 2)
 
             log.info(
-                "Chunk %d | Latency: %.2f ms | Acoustic: %.4f | Risk: %.1f (%s) | Mismatch: %s",
+                "Chunk %d | Latency: %.2f ms | Acoustic: %.4f | Speaker: %s | Risk: %.1f (%s) | Mismatch: %s | Spoof: %s",
                 chunk.chunk_id,
                 latency_ms,
                 score_acoustic,
+                f"{score_speaker_val:.4f}" if score_speaker_val is not None else "N/A",
                 risk_score,
                 risk_tier,
-                speaker_mismatch
+                speaker_mismatch,
+                is_spoof
             )
 
-            # 6. Send RiskUpdate response
+            # 7. Construct and send RiskUpdate response
             update = RiskUpdate(
                 chunk_id=chunk.chunk_id,
                 score_acoustic=round(score_acoustic, 4),
-                score_speaker=score_speaker,
+                score_speaker=round(score_speaker_val, 4) if score_speaker_val is not None else None,
                 risk_score=risk_score,
                 risk_tier=risk_tier,
                 speaker_mismatch=speaker_mismatch,
-                latency_ms=latency_ms
+                latency_ms=latency_ms,
+                is_spoof=is_spoof
             )
+
+            if chunk.session_id:
+                update_session_risk(chunk.session_id, update)
 
             await websocket.send_text(update.model_dump_json())
 
@@ -161,3 +201,4 @@ async def websocket_audio_stream(websocket: WebSocket) -> None:
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
