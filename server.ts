@@ -155,6 +155,89 @@ Incident Data: ${JSON.stringify(incidentData)}`;
     }
   });
 
+  // 4. Alert policy configuration persistence
+  const DEFAULT_ALERT_POLICY = {
+    globalThreshold: 70,
+    highValueCutoffInr: 1000000,
+    channels: {
+      slack: true,
+      sms: true,
+      ivrCallback: true,
+      siemWebhook: true,
+      telecomKillswitch: true,
+    },
+    rules: [
+      {
+        id: "rule-01",
+        name: "High Risk Synthetic Voice",
+        condition: "riskScore >= 70%",
+        thresholdRisk: 70,
+        channels: {
+          slackSOC: true,
+          smsExecutive: true,
+          ivrCallback: true,
+          siemWebhook: true,
+          telecomAutoDrop: true,
+        },
+        action: "Immediate Call Termination",
+        enabled: true,
+        appliesTo: ["all"]
+      },
+      {
+        id: "rule-02",
+        name: "Large Wire Verification",
+        condition: "transactionAmount >= ₹10 Lakhs",
+        thresholdRisk: 60,
+        minAmountInr: 1000000,
+        channels: {
+          slackSOC: true,
+          smsExecutive: false,
+          ivrCallback: true,
+          siemWebhook: true,
+          telecomAutoDrop: false,
+        },
+        action: "Require 2FA Callback",
+        enabled: true,
+        appliesTo: ["corporate-banking"]
+      }
+    ]
+  };
+
+  let alertPolicyConfig = { ...DEFAULT_ALERT_POLICY };
+
+  const respondWithAlertConfig = (res: any) => {
+    res.json({
+      success: true,
+      config: alertPolicyConfig,
+      globalThreshold: alertPolicyConfig.globalThreshold,
+      highValueCutoffInr: alertPolicyConfig.highValueCutoffInr,
+      channels: alertPolicyConfig.channels,
+      rules: alertPolicyConfig.rules,
+      savedAt: new Date().toISOString(),
+    });
+  };
+
+  const routeAliases = [
+    "/api/alert-config",
+    "/api/alert-policies",
+    "/api/policies/alerts",
+    "/api/config/alerts",
+  ];
+
+  for (const route of routeAliases) {
+    app.get(route, (_, res) => respondWithAlertConfig(res));
+    app.post(route, (req, res) => {
+      const nextConfig = req.body || {};
+      alertPolicyConfig = {
+        ...DEFAULT_ALERT_POLICY,
+        ...nextConfig,
+        channels: { ...DEFAULT_ALERT_POLICY.channels, ...(nextConfig.channels || {}) },
+        rules: Array.isArray(nextConfig.rules) && nextConfig.rules.length > 0 ? nextConfig.rules : DEFAULT_ALERT_POLICY.rules,
+      };
+      respondWithAlertConfig(res);
+    });
+  }
+
   // ==========================================
   // VITE MIDDLEWARE (DEV) & STATIC SERVE (PROD)
   // ==========================================

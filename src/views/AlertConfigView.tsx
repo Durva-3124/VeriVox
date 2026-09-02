@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Sliders, 
   Bell, 
@@ -19,20 +19,75 @@ import {
 import { DEFAULT_ALERT_RULES } from '../data/mockData';
 import { AlertRule } from '../types';
 
+const DEFAULT_CHANNELS = {
+  slack: true,
+  sms: true,
+  ivrCallback: true,
+  siemWebhook: true,
+  telecomKillswitch: true,
+};
+
+const CONFIG_ENDPOINTS = [
+  '/api/alert-config',
+  '/api/alert-policies',
+  '/api/policies/alerts',
+  '/api/config/alerts',
+];
+
+const normalizeConfigResponse = (payload: any) => {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const topLevel = payload.alertConfig ?? payload.config ?? payload.policy ?? payload;
+  const nestedChannels = topLevel.channels ?? payload.channels ?? DEFAULT_CHANNELS;
+  const normalizedRules = Array.isArray(topLevel.rules ?? payload.rules)
+    ? (topLevel.rules ?? payload.rules)
+    : DEFAULT_ALERT_RULES;
+
+  return {
+    globalThreshold: Number(topLevel.globalThreshold ?? payload.globalThreshold ?? 70),
+    highValueCutoffInr: Number(topLevel.highValueCutoffInr ?? payload.highValueCutoffInr ?? 1000000),
+    channels: {
+      ...DEFAULT_CHANNELS,
+      ...nestedChannels,
+    },
+    rules: normalizedRules as AlertRule[],
+  };
+};
+
 export const AlertConfigView: React.FC = () => {
   const [rules, setRules] = useState<AlertRule[]>(DEFAULT_ALERT_RULES);
   const [globalThreshold, setGlobalThreshold] = useState<number>(70);
   const [highValueCutoffInr, setHighValueCutoffInr] = useState<number>(1000000);
   const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
 
   // Channels state
-  const [channels, setChannels] = useState({
-    slack: true,
-    sms: true,
-    ivrCallback: true,
-    siemWebhook: true,
-    telecomKillswitch: true,
-  });
+  const [channels, setChannels] = useState(DEFAULT_CHANNELS);
+
+  const loadConfig = async () => {
+    for (const endpoint of CONFIG_ENDPOINTS) {
+      try {
+        const response = await fetch(endpoint, { method: 'GET' });
+        if (!response.ok) continue;
+
+        const payload = await response.json();
+        const normalized = normalizeConfigResponse(payload);
+        if (!normalized) continue;
+
+        setGlobalThreshold(normalized.globalThreshold);
+        setHighValueCutoffInr(normalized.highValueCutoffInr);
+        setChannels(normalized.channels);
+        setRules(normalized.rules);
+        return;
+      } catch {
+        // Try the next candidate route until one works.
+      }
+    }
+  };
+
+  useEffect(() => {
+    void loadConfig();
+  }, []);
 
   const handleToggleRule = (id: string) => {
     setRules((prev) =>
@@ -40,8 +95,47 @@ export const AlertConfigView: React.FC = () => {
     );
   };
 
-  const handleSaveConfig = () => {
-    setSaveToast('Policy rules deployed to active edge DSP nodes.');
+  const handleSaveConfig = async () => {
+    setSaveStatus('saving');
+    setSaveToast(null);
+
+    const payload = {
+      globalThreshold,
+      highValueCutoffInr,
+      channels,
+      rules,
+      savedAt: new Date().toISOString(),
+    };
+
+    let lastError: Error | null = null;
+
+    for (const endpoint of CONFIG_ENDPOINTS) {
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `Request failed with ${response.status}`);
+        }
+
+        const result = await response.json().catch(() => ({}));
+        const successMessage = result?.message || 'Policy rules deployed to active edge DSP nodes.';
+
+        setSaveStatus('success');
+        setSaveToast(successMessage);
+        setTimeout(() => setSaveToast(null), 4000);
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error('Unable to save policy config.');
+      }
+    }
+
+    setSaveStatus('error');
+    setSaveToast(lastError?.message || 'Unable to save policy config.');
     setTimeout(() => setSaveToast(null), 4000);
   };
 
@@ -64,16 +158,23 @@ export const AlertConfigView: React.FC = () => {
 
         <button
           onClick={handleSaveConfig}
-          className="px-5 py-2.5 rounded-lg bg-[#2E7DFF] hover:bg-[#2566D8] text-white text-xs font-bold font-mono uppercase tracking-wider shadow flex items-center gap-2 transition-all"
+          disabled={saveStatus === 'saving'}
+          className="px-5 py-2.5 rounded-lg bg-[#2E7DFF] hover:bg-[#2566D8] text-white text-xs font-bold font-mono uppercase tracking-wider shadow flex items-center gap-2 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          <Check className="w-4 h-4" />
-          <span>Save &amp; Deploy Policies</span>
+          {saveStatus === 'saving' ? <Zap className="w-4 h-4 animate-pulse" /> : <Check className="w-4 h-4" />}
+          <span>{saveStatus === 'saving' ? 'Saving...' : 'Save & Deploy Policies'}</span>
         </button>
       </div>
 
       {saveToast && (
-        <div className="p-3 rounded-lg bg-[#22C55E]/10 border border-[#22C55E]/30 text-[#22C55E] text-xs flex items-center gap-2 font-mono">
-          <Check className="w-4 h-4 text-[#22C55E]" />
+        <div
+          className={`p-3 rounded-lg border text-xs flex items-center gap-2 font-mono ${
+            saveStatus === 'error'
+              ? 'bg-[#EF4444]/10 border-[#EF4444]/30 text-[#FCA5A5]'
+              : 'bg-[#22C55E]/10 border-[#22C55E]/30 text-[#22C55E]'
+          }`}
+        >
+          {saveStatus === 'error' ? <ShieldAlert className="w-4 h-4 text-[#FCA5A5]" /> : <Check className="w-4 h-4 text-[#22C55E]" />}
           <span>{saveToast}</span>
         </div>
       )}

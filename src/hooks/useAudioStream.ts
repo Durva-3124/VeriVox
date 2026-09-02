@@ -9,7 +9,7 @@ import {
   type AudioChunkPayload,
 } from '../utils/audioChunk';
 
-export type StreamStatus = 'idle' | 'connecting' | 'connected' | 'recording' | 'stopped' | 'error';
+export type StreamStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'recording' | 'stopped' | 'disconnected' | 'error';
 
 export interface AudioStreamMessage {
   type?: string;
@@ -102,21 +102,22 @@ export function useAudioStream(options: UseAudioStreamOptions = {}) {
     return ws;
   }, [onClose, onError, onMessage, onOpen, wsUrl]);
 
-  const sendChunk = useCallback((chunk: Float32Array) => {
+  const sendChunk = useCallback((chunk: Float32Array, chunkId: number = Date.now()) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       return;
     }
 
     const payload: AudioChunkPayload = createAudioChunkMessage({
-      sessionId,
-      claimedVoiceprintId,
-      carrierOrigin,
+      chunkId,
       sampleRate,
       chunk,
+      timestampCaptureMs: Date.now(),
+      durationMs: 200,
+      isSpeech: true,
     });
 
     socketRef.current.send(JSON.stringify(payload));
-  }, [carrierOrigin, claimedVoiceprintId, sampleRate, sessionId]);
+  }, [sampleRate]);
 
   const flushAudioBuffer = useCallback(() => {
     if (audioBufferRef.current.length === 0 || !socketRef.current) {

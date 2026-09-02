@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Play, 
   Pause, 
@@ -24,6 +24,7 @@ import { RiskGauge } from '../components/RiskGauge';
 import { DualWaveformVisualizer } from '../components/DualWaveformVisualizer';
 import { DefensePipelineVisualizer } from '../components/DefensePipelineVisualizer';
 import { MultiChannelAlertFeed, AlertFeedItem } from '../components/MultiChannelAlertFeed';
+import { useAudioStream } from '../hooks/useAudioStream';
 import { DemoScenario, DetectionScores, SpeakerFingerprintMatch } from '../types';
 import { 
   CLONED_CXO_SCENARIO, 
@@ -64,6 +65,19 @@ interface VoiceAnalysisCoreViewProps {
   initialScenarioId?: 'cloned-cxo' | 'genuine-cxo' | 'emergency-pretext' | 'banking-otp' | 'mic-live' | 'custom';
 }
 
+type LiveRiskUpdate = {
+  chunk_id?: number;
+  score_acoustic?: number;
+  score_speaker?: number;
+  risk_score?: number;
+  risk_tier?: 'low' | 'elevated' | 'critical';
+  speaker_mismatch?: boolean;
+  latency_ms?: number;
+  error?: string;
+};
+
+type LiveStreamStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error';
+
 export const VoiceAnalysisCoreView: React.FC<VoiceAnalysisCoreViewProps> = ({
   initialScenarioId = 'cloned-cxo',
 }) => {
@@ -99,6 +113,14 @@ export const VoiceAnalysisCoreView: React.FC<VoiceAnalysisCoreViewProps> = ({
   const [geminiReportLoading, setGeminiReportLoading] = useState<boolean>(false);
   const [geminiForensicText, setGeminiForensicText] = useState<string | null>(null);
 
+  // Live WebSocket stream state
+  const [useLivePipeline, setUseLivePipeline] = useState<boolean>(true);
+  const [liveStreamStatus, setLiveStreamStatus] = useState<LiveStreamStatus>('connecting');
+  const [liveStreamError, setLiveStreamError] = useState<string | null>(null);
+  const [liveRiskUpdate, setLiveRiskUpdate] = useState<LiveRiskUpdate | null>(null);
+  const liveSocketRef = useRef<WebSocket | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+
   // Get active scenario metadata
   const getActiveScenario = (): DemoScenario => {
     switch (selectedScenarioId) {
@@ -116,6 +138,53 @@ export const VoiceAnalysisCoreView: React.FC<VoiceAnalysisCoreViewProps> = ({
 
   const scenario = getActiveScenario();
   const isCloned = selectedScenarioId === 'cloned-cxo' || selectedScenarioId === 'emergency-pretext' || selectedScenarioId === 'banking-otp';
+
+  const liveStreamClient = useAudioStream({
+    wsUrl: (import.meta.env.VITE_WS_URL ?? 'ws://localhost:8000/stream').replace(/^http/, 'ws'),
+    onMessage: (message) => {
+      const payload = message as LiveRiskUpdate;
+      if (payload && (payload.error || payload.risk_score !== undefined || payload.score_acoustic !== undefined)) {
+        if (payload.error) {
+          setLiveStreamError(payload.error);
+          setLiveStreamStatus('error');
+          return;
+        }
+        setLiveRiskUpdate(payload);
+        setLiveStreamStatus('connected');
+        setLiveStreamError(null);
+      }
+    },
+    onOpen: () => {
+      setLiveStreamStatus('connected');
+      setLiveStreamError(null);
+    },
+    onClose: () => {
+      setLiveStreamStatus(useLivePipeline ? 'reconnecting' : 'disconnected');
+      if (useLivePipeline) {
+        setLiveStreamError('Venue Wi‑Fi dropped. Reconnecting to live analysis stream...');
+      }
+    },
+    onError: () => {
+      setLiveStreamStatus('error');
+      setLiveStreamError('Live stream connection failed. Retrying...');
+    },
+  });
+
+  const { start: startLiveAudio, stop: stopLiveAudio, status: audioStreamStatus } = liveStreamClient;
+
+  useEffect(() => {
+    if (!useLivePipeline) {
+      setLiveStreamStatus('disconnected');
+      setLiveStreamError(null);
+      stopLiveAudio();
+      return;
+    }
+
+    setLiveStreamStatus(audioStreamStatus === 'recording' || audioStreamStatus === 'connected' ? 'connected' : audioStreamStatus === 'connecting' ? 'connecting' : audioStreamStatus === 'error' ? 'error' : 'reconnecting');
+    if (audioStreamStatus === 'error') {
+      setLiveStreamError('Live stream connection failed. Retrying...');
+    }
+  }, [audioStreamStatus, stopLiveAudio, useLivePipeline]);
 
   // High-Resolution Playback Clock (100ms ticks)
   useEffect(() => {
@@ -138,6 +207,22 @@ export const VoiceAnalysisCoreView: React.FC<VoiceAnalysisCoreViewProps> = ({
   const timelinePoints = isCloned ? CLONED_TIMELINE_POINTS : GENUINE_TIMELINE_POINTS;
 
   const currentTimelinePoint = useMemo(() => {
+    if (useLivePipeline && liveRiskUpdate) {
+      const riskScore = Number(liveRiskUpdate.risk_score ?? 0);
+      const acousticScore = Number(liveRiskUpdate.score_acoustic ?? 0) * 100;
+      const speakerMismatch = typeof liveRiskUpdate.score_speaker === 'number'
+        ? Math.round((1 - Number(liveRiskUpdate.score_speaker)) * 100)
+        : (liveRiskUpdate.speaker_mismatch ? 100 : 0);
+      return {
+        timeSec: playbackTime,
+        timeLabel: `${playbackTime.toFixed(1)}s`,
+        overallRisk: Math.round(riskScore),
+        syntheticScore: Math.round(acousticScore),
+        speakerMismatch,
+        statusText: liveRiskUpdate.speaker_mismatch ? 'Speaker mismatch detected by live pipeline' : 'Live pipeline is within acceptable trust envelope',
+      };
+    }
+
     for (let i = 0; i < timelinePoints.length - 1; i++) {
       const p1 = timelinePoints[i];
       const p2 = timelinePoints[i + 1];
@@ -162,10 +247,38 @@ export const VoiceAnalysisCoreView: React.FC<VoiceAnalysisCoreViewProps> = ({
       speakerMismatch: last.speakerMismatch,
       statusText: last.statusText,
     };
-  }, [timelinePoints, playbackTime]);
+  }, [liveRiskUpdate, playbackTime, timelinePoints, useLivePipeline]);
 
   // Computed Detection Scores
   const currentScores: DetectionScores = useMemo(() => {
+    if (useLivePipeline && liveRiskUpdate) {
+      const acousticScore = Number(liveRiskUpdate.score_acoustic ?? 0);
+      const speakerScore = typeof liveRiskUpdate.score_speaker === 'number'
+        ? Number(liveRiskUpdate.score_speaker)
+        : (liveRiskUpdate.speaker_mismatch ? 0.0 : 1.0);
+      const riskScore = Number(liveRiskUpdate.risk_score ?? Math.min(100, Math.max(0, acousticScore * 100 + ((1 - speakerScore) * 100 * 0.6))));
+      const speakerMismatchScore = Math.min(100, Math.max(0, (1 - speakerScore) * 100));
+      const spectralArtifacts = Math.round(acousticScore * 100);
+
+      return {
+        overallRisk: Math.round(riskScore),
+        spectralArtifacts,
+        prosodyNaturalness: Math.max(0, 100 - spectralArtifacts),
+        pitchMicroVariation: liveRiskUpdate.speaker_mismatch ? 82 : 14,
+        crossSessionMatch: Math.round(speakerScore * 100),
+        glottalPulseDiscontinuity: liveRiskUpdate.speaker_mismatch ? 91 : 9,
+        temporalJitter: liveRiskUpdate.speaker_mismatch ? 74 : 13,
+        phaseIncoherence: liveRiskUpdate.speaker_mismatch ? 86 : 10,
+        speakerMismatchScore,
+        inferenceLatencyMs: Number(liveRiskUpdate.latency_ms ?? 34),
+        detectionStatus: riskScore >= 75
+          ? 'High Risk — Cloned Voice Detected'
+          : riskScore >= 40
+          ? 'Elevated Risk — Anomaly Detected'
+          : 'Low Risk — Natural Speech',
+      };
+    }
+
     return {
       overallRisk: currentTimelinePoint.overallRisk,
       spectralArtifacts: currentTimelinePoint.syntheticScore,
@@ -183,21 +296,30 @@ export const VoiceAnalysisCoreView: React.FC<VoiceAnalysisCoreViewProps> = ({
         ? 'Elevated Risk — Anomaly Detected'
         : 'Low Risk — Natural Speech',
     };
-  }, [currentTimelinePoint, isCloned, playbackTime]);
+  }, [currentTimelinePoint, isCloned, liveRiskUpdate, playbackTime, useLivePipeline]);
 
   const speakerCosine = useMemo(() => {
+    if (useLivePipeline && liveRiskUpdate) {
+      const speakerScore = typeof liveRiskUpdate.score_speaker === 'number'
+        ? Number(liveRiskUpdate.score_speaker)
+        : (liveRiskUpdate.speaker_mismatch ? 0.0 : 1.0);
+      return Number(Math.min(1, Math.max(0, speakerScore)).toFixed(4));
+    }
+
     if (!isCloned) return 0.98;
     if (playbackTime < 1.5) return 0.72;
     if (playbackTime < 3.4) return Number((0.72 - (playbackTime - 1.5) * 0.26).toFixed(2));
     return 0.22;
-  }, [isCloned, playbackTime]);
+  }, [isCloned, liveRiskUpdate, playbackTime, useLivePipeline]);
 
   const speakerFingerprint: SpeakerFingerprintMatch = {
     ...scenario.speakerFingerprint,
     cosineSimilarity: speakerCosine,
-    authenticityVerdict: (!isCloned || playbackTime < 3.4) 
-      ? (isCloned ? 'PARTIAL_LOW_CONFIDENCE' : 'MATCH_GENUINE') 
-      : 'MISMATCH_IMPERSONATOR',
+    authenticityVerdict: useLivePipeline && liveRiskUpdate
+      ? (liveRiskUpdate.speaker_mismatch ? 'MISMATCH_IMPERSONATOR' : 'MATCH_GENUINE')
+      : ((!isCloned || playbackTime < 3.4)
+        ? (isCloned ? 'PARTIAL_LOW_CONFIDENCE' : 'MATCH_GENUINE')
+        : 'MISMATCH_IMPERSONATOR'),
   };
 
   // Instant Test Marathi Preset matching screenshot action button
@@ -247,19 +369,13 @@ export const VoiceAnalysisCoreView: React.FC<VoiceAnalysisCoreViewProps> = ({
 
   // Live Microphone Recording
   const startMicrophoneCapture = async () => {
+    setUseLivePipeline(true);
+    setLiveStreamStatus('connecting');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      micStreamRef.current = stream;
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      audioContextRef.current = audioCtx;
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-
+      await startLiveAudio();
       setIsRecording(true);
       setRecordingSeconds(0);
+      setMicVolume(0.6);
 
       recordIntervalRef.current = setInterval(() => {
         setRecordingSeconds(prev => {
@@ -273,27 +389,10 @@ export const VoiceAnalysisCoreView: React.FC<VoiceAnalysisCoreViewProps> = ({
           return prev + 1;
         });
       }, 1000);
-
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-
-      const updateMicData = () => {
-        if (!analyserRef.current) return;
-        analyserRef.current.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < bufferLength; i++) {
-          sum += dataArray[i];
-        }
-        const avg = sum / bufferLength / 255;
-        setMicVolume(avg);
-
-        if (micStreamRef.current && micStreamRef.current.active) {
-          requestAnimationFrame(updateMicData);
-        }
-      };
-      requestAnimationFrame(updateMicData);
     } catch {
       setIsRecording(false);
+      setLiveStreamError('Microphone access was denied.');
+      setLiveStreamStatus('error');
     }
   };
 
@@ -302,6 +401,7 @@ export const VoiceAnalysisCoreView: React.FC<VoiceAnalysisCoreViewProps> = ({
       clearInterval(recordIntervalRef.current);
       recordIntervalRef.current = null;
     }
+    stopLiveAudio();
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach((t) => t.stop());
       micStreamRef.current = null;
@@ -311,6 +411,7 @@ export const VoiceAnalysisCoreView: React.FC<VoiceAnalysisCoreViewProps> = ({
       audioContextRef.current = null;
     }
     setIsRecording(false);
+    setMicVolume(0);
   };
 
   useEffect(() => {
@@ -375,27 +476,69 @@ export const VoiceAnalysisCoreView: React.FC<VoiceAnalysisCoreViewProps> = ({
           </p>
         </div>
 
-        {/* Language Context Selector matching screenshot */}
-        <div className="flex items-center gap-2 bg-[#091222] border border-[#22D3EE]/30 rounded-xl px-3 py-1.5 shadow-sm flex-wrap md:flex-nowrap">
-          <Languages className="icon-sm icon-primary shrink-0" />
-          <span className="text-xs text-slate-300 font-medium whitespace-nowrap">Language Context:</span>
-          <select
-            value={selectedLanguage}
-            onChange={(e) => setSelectedLanguage(e.target.value)}
-            className="bg-transparent border-none text-xs font-semibold text-white focus:outline-none cursor-pointer"
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <div className="flex items-center gap-2 rounded-xl border border-[#22D3EE]/25 bg-[#091222] px-2 py-1.5">
+            <button
+              type="button"
+              onClick={() => setUseLivePipeline(true)}
+              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-[0.18em] transition-colors ${
+                useLivePipeline ? 'bg-[#22D3EE]/20 text-[#22D3EE] border border-[#22D3EE]/40' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Live WS
+            </button>
+            <button
+              type="button"
+              onClick={() => setUseLivePipeline(false)}
+              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-[0.18em] transition-colors ${
+                !useLivePipeline ? 'bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/35' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Mock Fallback
+            </button>
+          </div>
+
+          <div
+            className={`inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] ${
+              liveStreamStatus === 'connected'
+                ? 'border-[#10B981]/35 bg-[#10B981]/10 text-[#10B981]'
+                : liveStreamStatus === 'error' || liveStreamStatus === 'reconnecting'
+                ? 'border-[#F59E0B]/35 bg-[#F59E0B]/10 text-[#F59E0B]'
+                : 'border-[#22D3EE]/30 bg-[#091222] text-[#22D3EE]'
+            }`}
           >
-            <option value="auto" className="bg-[#0B1120] text-white">Auto-Detect Language</option>
-            <option value="mr" className="bg-[#0B1120] text-white">Marathi (मराठी)</option>
-            <option value="hi" className="bg-[#0B1120] text-white">Hindi (हिन्दी)</option>
-            <option value="ta" className="bg-[#0B1120] text-white">Tamil (தமிழ்)</option>
-            <option value="te" className="bg-[#0B1120] text-white">Telugu (తెలుగు)</option>
-            <option value="bn" className="bg-[#0B1120] text-white">Bengali (বাংলা)</option>
-            <option value="kn" className="bg-[#0B1120] text-white">Kannada (ಕನ್ನಡ)</option>
-            <option value="gu" className="bg-[#0B1120] text-white">Gujarati (ગુજરાતી)</option>
-            <option value="en" className="bg-[#0B1120] text-white">English (Indian)</option>
-          </select>
+            <span className="h-2 w-2 rounded-full bg-current" />
+            {liveStreamStatus}
+          </div>
+
+          {/* Language Context Selector matching screenshot */}
+          <div className="flex items-center gap-2 bg-[#091222] border border-[#22D3EE]/30 rounded-xl px-3 py-1.5 shadow-sm flex-wrap md:flex-nowrap">
+            <Languages className="icon-sm icon-primary shrink-0" />
+            <span className="text-xs text-slate-300 font-medium whitespace-nowrap">Language Context:</span>
+            <select
+              value={selectedLanguage}
+              onChange={(e) => setSelectedLanguage(e.target.value)}
+              className="bg-transparent border-none text-xs font-semibold text-white focus:outline-none cursor-pointer"
+            >
+              <option value="auto" className="bg-[#0B1120] text-white">Auto-Detect Language</option>
+              <option value="mr" className="bg-[#0B1120] text-white">Marathi (मराठी)</option>
+              <option value="hi" className="bg-[#0B1120] text-white">Hindi (हिन्दी)</option>
+              <option value="ta" className="bg-[#0B1120] text-white">Tamil (தமிழ்)</option>
+              <option value="te" className="bg-[#0B1120] text-white">Telugu (తెలుగు)</option>
+              <option value="bn" className="bg-[#0B1120] text-white">Bengali (বাংলা)</option>
+              <option value="kn" className="bg-[#0B1120] text-white">Kannada (ಕನ್ನಡ)</option>
+              <option value="gu" className="bg-[#0B1120] text-white">Gujarati (ગુજરાતી)</option>
+              <option value="en" className="bg-[#0B1120] text-white">English (Indian)</option>
+            </select>
+          </div>
         </div>
       </div>
+
+      {liveStreamError && (
+        <div className="rounded-xl border border-[#F59E0B]/35 bg-[#F59E0B]/10 px-3 py-2 text-xs text-[#FDE68A]">
+          {liveStreamError}
+        </div>
+      )}
 
       {/* Main Two-Column Layout matching screenshot */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

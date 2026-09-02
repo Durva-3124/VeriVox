@@ -3,11 +3,12 @@ export const AUDIO_CHUNK_OVERLAP = 1600;
 export const DEFAULT_STREAM_WS_URL = 'ws://localhost:8000/stream';
 
 export interface AudioChunkPayload {
-  sessionId: string;
-  claimedVoiceprintId?: string;
-  carrierOrigin?: string;
-  sampleRate: number;
-  audioChunkB64: string;
+  chunk_id: number;
+  timestamp_capture_ms: number;
+  sample_rate: number;
+  duration_ms: number;
+  is_speech: boolean;
+  audio_b64: string;
 }
 
 export function resampleTo16kHzMono(samples: Float32Array, sourceSampleRate = 48000): Float32Array {
@@ -70,23 +71,26 @@ export function float32ToBase64(samples: Float32Array): string {
 }
 
 export function createAudioChunkMessage({
-  sessionId,
-  claimedVoiceprintId,
-  carrierOrigin,
+  chunkId,
   sampleRate,
   chunk,
+  timestampCaptureMs,
+  durationMs = 200,
+  isSpeech = true,
 }: {
-  sessionId: string;
-  claimedVoiceprintId?: string;
-  carrierOrigin?: string;
+  chunkId: number;
   sampleRate: number;
   chunk: Float32Array;
+  timestampCaptureMs?: number;
+  durationMs?: number;
+  isSpeech?: boolean;
 }): AudioChunkPayload {
   return {
-    sessionId,
-    claimedVoiceprintId,
-    carrierOrigin,
-    sampleRate,
-    audioChunkB64: float32ToBase64(chunk),
+    chunk_id: chunkId,
+    timestamp_capture_ms: timestampCaptureMs ?? Date.now(),
+    sample_rate: sampleRate,
+    duration_ms: durationMs,
+    is_speech: isSpeech,
+    audio_b64: float32ToBase64(chunk),
   };
 }
