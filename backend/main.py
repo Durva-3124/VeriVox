@@ -30,6 +30,7 @@ from backend.model_runtime import aasist_runtime
 from backend.policy import router as policy_router, update_session_risk
 from backend.risk import RiskScorer, is_acoustic_spoof
 from backend.schemas import AudioChunk, RiskUpdate
+from backend.session import router as session_router
 from model.speaker_verification import enroll_speaker, score_speaker
 
 logging.basicConfig(
@@ -54,10 +55,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount APIRouters for enrollment, policy, and alert modules
+# Mount APIRouters for enrollment, policy, alert, and session modules
 app.include_router(enrollment_router)
 app.include_router(policy_router)
 app.include_router(alerts_router)
+app.include_router(session_router)
 
 
 @app.get("/health")
@@ -111,7 +113,21 @@ async def websocket_audio_stream(websocket: WebSocket) -> None:
             if not chunk.is_speech or len(waveform) == 0:
                 t_end = time.perf_counter()
                 latency_ms = round((t_end - t_start) * 1000.0, 2)
-                risk_score, risk_tier, speaker_mismatch = risk_scorer.score_chunk(acoustic=0.0, speaker=None)
+                # Compute context weight for silence chunk
+                # known-contact lookup and historical fraud-indicator signals are NOT implemented — require Harsh's dataset work, out of scope for today. Only caller-privilege and transaction-amount are live.
+                cw_raw = 1.0
+                if chunk.is_privileged_caller:
+                    cw_raw *= 1.3
+                if chunk.transaction_amount is not None and chunk.transaction_amount > 1_000_000:
+                    cw_raw *= 1.2
+                cw_raw = min(cw_raw, 2.0)
+                cw = (cw_raw - 1.0) / (2.0 - 1.0)
+                risk_score, risk_tier, speaker_mismatch = risk_scorer.score_chunk(
+                    acoustic=0.0,
+                    speaker=None,
+                    score_prosody=0.0,
+                    context_weight=cw
+                )
                 update = RiskUpdate(
                     chunk_id=chunk.chunk_id,
                     score_acoustic=0.0,
@@ -138,6 +154,32 @@ async def websocket_audio_stream(websocket: WebSocket) -> None:
                 await websocket.send_json({"error": f"Inference failed: {infer_err}"})
                 continue
 
+            # 4b. Compute Prosodic Score via public run_module2() API
+            score_prosody_val: Optional[float] = None
+            try:
+                from model.inference import run_module2
+                wav_tensor = torch.from_numpy(waveform)
+                mod2_res = run_module2(wav_tensor, chunk.sample_rate)
+                score_prosody_val = mod2_res.get("score_prosody")
+            except Exception as pros_err:
+                log.warning("Prosodic scoring via run_module2 failed for chunk %d: %s", chunk.chunk_id, pros_err)
+                score_prosody_val = None
+
+            # 4c. Compute Context Weight
+            # known-contact lookup and historical fraud-indicator signals are NOT implemented — require Harsh's dataset work, out of scope for today. Only caller-privilege and transaction-amount are live.
+            context_weight_raw = 1.0
+            if chunk.is_privileged_caller:
+                context_weight_raw *= 1.3
+            if chunk.transaction_amount is not None and chunk.transaction_amount > 1_000_000:
+                context_weight_raw *= 1.2
+            context_weight_raw = min(context_weight_raw, 2.0)
+
+            # Normalize to [0,1]: maps the neutral baseline (1.0) to 0.0, and the
+            # maximum context risk (2.0, both flags fired) to 1.0 — matching the
+            # scale of score_acoustic/score_prosody/score_speaker so a normal call
+            # doesn't get a permanent baseline risk boost.
+            context_weight = (context_weight_raw - 1.0) / (2.0 - 1.0)
+
             # 5. Speaker Verification (ECAPA-TDNN 192-dim vector)
             score_speaker_val: Optional[float] = None
             if chunk.caller_id and is_enrolled(chunk.caller_id):
@@ -154,7 +196,9 @@ async def websocket_audio_stream(websocket: WebSocket) -> None:
             # 6. Evaluate Risk & Speaker Consistency
             risk_score, risk_tier, speaker_mismatch = risk_scorer.score_chunk(
                 acoustic=score_acoustic,
-                speaker=score_speaker_val
+                speaker=score_speaker_val,
+                score_prosody=score_prosody_val,
+                context_weight=context_weight
             )
 
             is_spoof = is_acoustic_spoof(score_acoustic)
