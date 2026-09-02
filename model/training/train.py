@@ -274,7 +274,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch_size",     type=int,   default=24)
     p.add_argument("--lr",             type=float, default=1e-4)
     p.add_argument("--seed",           type=int,   default=42)
-    p.add_argument("--num_workers",    type=int,   default=4)
+    p.add_argument("--num_workers",    type=int,   default=0)  # 0 = main process only (required on Windows)
     p.add_argument(
         "--checkpoint_dir",
         default=str(Path(__file__).resolve().parent / "checkpoints"),
