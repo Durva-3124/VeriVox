@@ -15,15 +15,17 @@ Provides:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
-from typing import Dict, Any, Optional
+from collections import deque
+from typing import Dict, Any, Deque, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.alerts import router as alerts_router
+from backend.alerts import router as alerts_router, send_sms_stub, send_email_stub
 from backend.auth import AuthMiddleware
 from backend.context import compute_context_weight_from_chunk, register_known_contact, register_fraud_indicator
 from backend.enrollment import router as enrollment_router, is_enrolled, get_enrolled_embedding
@@ -35,12 +37,12 @@ from backend.session import router as session_router
 
 try:
     import torch
-    from model.speaker_verification import enroll_speaker, score_speaker
+    from model.speaker_verification import score_speaker, _embed
     TORCH_AVAILABLE = True
 except (ImportError, ModuleNotFoundError):
     torch = None
-    enroll_speaker = None
     score_speaker = None
+    _embed = None
     TORCH_AVAILABLE = False
 
 logging.basicConfig(
@@ -96,8 +98,11 @@ async def websocket_audio_stream(websocket: WebSocket) -> None:
     await websocket.accept()
     log.info("WebSocket connection established with client: %s", websocket.client)
 
-    # Per-connection session risk scorer instance
+    # Per-connection state
     risk_scorer = RiskScorer(window_size=5)
+    # Rolling buffer: accumulate 20 × 200ms chunks = 4s before calling run_module2()
+    _SEGMENT_CHUNKS = 20
+    chunk_buffer: Deque["torch.Tensor"] = deque(maxlen=_SEGMENT_CHUNKS)
 
     try:
         while True:
@@ -159,16 +164,22 @@ async def websocket_audio_stream(websocket: WebSocket) -> None:
                 await websocket.send_json({"error": f"Inference failed: {infer_err}"})
                 continue
 
-            # 4b. Compute Prosodic Score via public run_module2() API
+            # 4b. Accumulate chunks; run run_module2() only on full 4s segments (off event loop)
             score_prosody_val: Optional[float] = None
-            try:
-                from model.inference import run_module2
-                wav_tensor = torch.from_numpy(waveform)
-                mod2_res = run_module2(wav_tensor, chunk.sample_rate)
-                score_prosody_val = mod2_res.get("score_prosody")
-            except Exception as pros_err:
-                log.warning("Prosodic scoring via run_module2 failed for chunk %d: %s", chunk.chunk_id, pros_err)
-                score_prosody_val = None
+            wav_tensor = torch.from_numpy(waveform)
+            chunk_buffer.append(wav_tensor)
+            if len(chunk_buffer) == _SEGMENT_CHUNKS:
+                try:
+                    from model.inference import run_module2, assemble_segment
+                    segment = assemble_segment(list(chunk_buffer))
+                    loop = asyncio.get_event_loop()
+                    mod2_res = await loop.run_in_executor(
+                        None, run_module2, segment, chunk.sample_rate
+                    )
+                    score_prosody_val = mod2_res.get("score_prosody")
+                except Exception as pros_err:
+                    log.warning("Prosodic scoring via run_module2 failed for chunk %d: %s", chunk.chunk_id, pros_err)
+                    score_prosody_val = None
 
             # 4c. Compute Context Weight (all 4 signals: privilege, amount, known-contact, fraud-history)
             context_weight = compute_context_weight_from_chunk(chunk)
@@ -179,8 +190,7 @@ async def websocket_audio_stream(websocket: WebSocket) -> None:
                 try:
                     enrolled_emb = get_enrolled_embedding(chunk.caller_id)
                     if enrolled_emb is not None:
-                        wav_tensor = torch.from_numpy(waveform)
-                        live_emb = enroll_speaker([wav_tensor])
+                        live_emb = _embed(wav_tensor)
                         score_speaker_val = score_speaker(live_emb, enrolled_emb)
                 except Exception as spk_err:
                     log.warning("Speaker verification failed for chunk %d: %s", chunk.chunk_id, spk_err)
@@ -226,6 +236,15 @@ async def websocket_audio_stream(websocket: WebSocket) -> None:
 
             if chunk.session_id:
                 update_session_risk(chunk.session_id, update)
+
+            # Auto-dispatch alerts on critical tier
+            if risk_tier == "critical" and chunk.session_id:
+                alert_msg = (
+                    f"[VeriVox ALERT] Session '{chunk.session_id}' reached CRITICAL risk tier "
+                    f"(score={risk_score:.1f}, spoof={is_spoof})."
+                )
+                send_sms_stub(alert_msg)
+                send_email_stub(alert_msg)
 
             await websocket.send_text(update.model_dump_json())
 

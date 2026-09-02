@@ -21,11 +21,24 @@ if str(_ROOT_DIR) not in sys.path:
 
 log = logging.getLogger("verivox.model_runtime")
 
+def _load_similarity_threshold() -> float:
+    """Load calibrated threshold from speaker EER report; fall back to 0.75."""
+    report = _ROOT_DIR / "datasets" / "speaker_eer_report.json"
+    if report.exists():
+        import json
+        try:
+            data = json.loads(report.read_text())
+            return float(data["optimal_threshold"])
+        except Exception:
+            pass
+    return 0.75
+
+
 try:
     from model.speaker_verification import score_speaker, is_mismatch, SIMILARITY_THRESHOLD
 except ImportError:
     log.warning("PyTorch not found; using NumPy fallback for model.speaker_verification contract helpers.")
-    SIMILARITY_THRESHOLD: float = 0.75
+    SIMILARITY_THRESHOLD: float = _load_similarity_threshold()
 
     def is_mismatch(score: float) -> bool:
         return score < SIMILARITY_THRESHOLD
