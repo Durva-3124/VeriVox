@@ -24,6 +24,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.alerts import router as alerts_router
+from backend.auth import AuthMiddleware
+from backend.context import compute_context_weight_from_chunk, register_known_contact, register_fraud_indicator
 from backend.enrollment import router as enrollment_router, is_enrolled, get_enrolled_embedding
 from backend.model_runtime import aasist_runtime
 from backend.policy import router as policy_router, update_session_risk
@@ -54,7 +56,10 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Enable CORS for local dev & testing
+# Auth + rate limiting (reads VERIVOX_API_KEYS env var; disabled in dev if unset)
+app.add_middleware(AuthMiddleware)
+
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -121,15 +126,7 @@ async def websocket_audio_stream(websocket: WebSocket) -> None:
             if not chunk.is_speech or len(waveform) == 0:
                 t_end = time.perf_counter()
                 latency_ms = round((t_end - t_start) * 1000.0, 2)
-                # Compute context weight for silence chunk
-                # known-contact lookup and historical fraud-indicator signals are NOT implemented — require Harsh's dataset work, out of scope for today. Only caller-privilege and transaction-amount are live.
-                cw_raw = 1.0
-                if chunk.is_privileged_caller:
-                    cw_raw *= 1.3
-                if chunk.transaction_amount is not None and chunk.transaction_amount > 1_000_000:
-                    cw_raw *= 1.2
-                cw_raw = min(cw_raw, 2.0)
-                cw = (cw_raw - 1.0) / (2.0 - 1.0)
+                cw = compute_context_weight_from_chunk(chunk)
                 risk_score, risk_tier, speaker_mismatch = risk_scorer.score_chunk(
                     acoustic=0.0,
                     speaker=None,
@@ -173,20 +170,8 @@ async def websocket_audio_stream(websocket: WebSocket) -> None:
                 log.warning("Prosodic scoring via run_module2 failed for chunk %d: %s", chunk.chunk_id, pros_err)
                 score_prosody_val = None
 
-            # 4c. Compute Context Weight
-            # known-contact lookup and historical fraud-indicator signals are NOT implemented — require Harsh's dataset work, out of scope for today. Only caller-privilege and transaction-amount are live.
-            context_weight_raw = 1.0
-            if chunk.is_privileged_caller:
-                context_weight_raw *= 1.3
-            if chunk.transaction_amount is not None and chunk.transaction_amount > 1_000_000:
-                context_weight_raw *= 1.2
-            context_weight_raw = min(context_weight_raw, 2.0)
-
-            # Normalize to [0,1]: maps the neutral baseline (1.0) to 0.0, and the
-            # maximum context risk (2.0, both flags fired) to 1.0 — matching the
-            # scale of score_acoustic/score_prosody/score_speaker so a normal call
-            # doesn't get a permanent baseline risk boost.
-            context_weight = (context_weight_raw - 1.0) / (2.0 - 1.0)
+            # 4c. Compute Context Weight (all 4 signals: privilege, amount, known-contact, fraud-history)
+            context_weight = compute_context_weight_from_chunk(chunk)
 
             # 5. Speaker Verification (ECAPA-TDNN 192-dim vector)
             score_speaker_val: Optional[float] = None
