@@ -63,6 +63,8 @@ class AudioChunk(BaseModel):
     session_id: Optional[str] = None
     is_privileged_caller: bool = False
     transaction_amount: Optional[float] = None
+    is_known_contact: bool = False
+    has_fraud_history: bool = False
 
     def decode_audio(self) -> np.ndarray:
         """

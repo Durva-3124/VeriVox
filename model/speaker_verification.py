@@ -36,10 +36,25 @@ log = logging.getLogger(__name__)
 # Threshold
 # ---------------------------------------------------------------------------
 
-# TODO: confirm with Atharv (backend) and Harsh (datasets) once real
-#       speaker-verification EER results are available on ASVspoof/VoxCeleb.
-#       0.75 is a conservative starting point — lower = stricter.
-SIMILARITY_THRESHOLD: float = 0.75
+# SIMILARITY_THRESHOLD is loaded from datasets/speaker_eer_report.json
+# (produced by datasets/calibrate_speaker_threshold.py) when available.
+# Falls back to 0.75 (conservative heuristic) if the report is absent.
+# Re-run calibration on real ASVspoof/VoxCeleb data to get a validated value.
+def _load_threshold() -> float:
+    import json
+    report = Path(__file__).resolve().parent.parent / "datasets" / "speaker_eer_report.json"
+    if report.exists():
+        try:
+            with open(report, encoding="utf-8") as _f:
+                data = json.load(_f)
+            t = float(data["optimal_threshold"])
+            log.info("SIMILARITY_THRESHOLD loaded from calibration report: %.4f", t)
+            return t
+        except Exception as _e:
+            log.warning("Could not read speaker_eer_report.json (%s) — using default 0.75", _e)
+    return 0.75
+
+SIMILARITY_THRESHOLD: float = _load_threshold()
 
 # SpeechBrain model identifier and local cache directory
 _MODEL_SOURCE = "speechbrain/spkrec-ecapa-voxceleb"

@@ -77,13 +77,8 @@ try:
 except ImportError:
     TORCH_AVAILABLE = False
 
-try:
-    import webrtcvad
-    VAD_AVAILABLE = True
-except ImportError:
-    VAD_AVAILABLE = False
-
 from collections import deque
+from ingestion.vad import has_speech as _has_speech, make_vad, is_speech_webrtc
 
 
 # ---------------------------------------------------------------------------
@@ -96,8 +91,6 @@ WINDOW_SAMPLES = 3200
 STEP_SAMPLES = WINDOW_SAMPLES // 2   # 50% overlap
 BUFFER_CHUNKS = 20                    # 20 x 3200 = 64,000 samples = 4 seconds
 FULL_SEGMENT_SAMPLES = WINDOW_SAMPLES * BUFFER_CHUNKS
-VAD_FRAME_MS = 30
-VAD_FRAME_SAMPLES = int(TARGET_SAMPLE_RATE * VAD_FRAME_MS / 1000)
 
 
 # ---------------------------------------------------------------------------
@@ -170,33 +163,21 @@ def make_windows(audio: np.ndarray, window_size: int = WINDOW_SAMPLES,
 # ---------------------------------------------------------------------------
 # 4. VAD (Voice Activity Detection)
 # ---------------------------------------------------------------------------
-def _float32_to_int16(audio_float32: np.ndarray) -> np.ndarray:
-    return (audio_float32 * 32767).astype(np.int16)
-
+# Canonical VAD logic lives in ingestion/vad.py.
+# make_vad() returns webrtcvad.Vad(aggressiveness=2) when webrtcvad is
+# installed, or None to trigger the RMS energy fallback in has_speech().
+# is_speech() is a thin wrapper kept here for backward compatibility.
 
 def is_speech(window: np.ndarray, vad_instance) -> bool:
     """
-    Returns True if the window contains speech, False if silence.
-    Splits into 30ms sub-frames (webrtcvad's requirement) and votes.
+    Returns True if the window contains speech.
+    Delegates to webrtcvad when vad_instance is not None,
+    otherwise falls back to the RMS energy gate in vad.py.
     """
-    window_int16 = _float32_to_int16(window)
-    speech_votes = 0
-    total_frames = 0
-    for start in range(0, len(window_int16) - VAD_FRAME_SAMPLES + 1, VAD_FRAME_SAMPLES):
-        frame = window_int16[start:start + VAD_FRAME_SAMPLES]
-        total_frames += 1
-        if vad_instance.is_speech(frame.tobytes(), TARGET_SAMPLE_RATE):
-            speech_votes += 1
-    if total_frames == 0:
-        return False
-    return (speech_votes / total_frames) > 0.5
+    if vad_instance is not None:
+        return is_speech_webrtc(window, vad_instance)
+    return _has_speech(window)
 
-
-def make_vad():
-    """Returns a configured webrtcvad.Vad instance (aggressiveness=2)."""
-    if not VAD_AVAILABLE:
-        raise RuntimeError("webrtcvad not installed -- run: py -m pip install webrtcvad")
-    return webrtcvad.Vad(2)
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +251,7 @@ def process_audio_file(input_path: str):
     """
     audio = normalize_audio_file(input_path)
     windows = make_windows(audio)
-    vad = make_vad()
+    vad = make_vad()   # webrtcvad.Vad(2) or None (RMS fallback)
     rolling = RollingBuffer()
 
     streaming_tensors = []
