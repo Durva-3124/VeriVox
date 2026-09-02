@@ -16,6 +16,7 @@ env/
 # Environment files
 .env
 .env.*
+!.env.example
 
 # Jupyter / notebooks
 .ipynb_checkpoints/
@@ -28,6 +29,18 @@ build/
 dist/
 coverage/
 .npm/
+.vite/
+.cache/
+.parcel-cache/
+*.tsbuildinfo
+
+# Local runtime / tool caches
+*.pid
+*.tmp
+*.bak
+.local/
+.local.env
+.python-version
 
 # Logs
 *.log
@@ -40,6 +53,17 @@ Thumbs.db
 .idea/
 .cursor/
 .cursorrules
+
+# Local env overrides
+.env.local
+.env.development.local
+.env.production.local
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.production.local
+backend/.env.local
+backend/.env.development.local
+backend/.env.production.local
 
 # Data / artifacts
 data/
