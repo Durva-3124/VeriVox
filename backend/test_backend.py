@@ -11,11 +11,15 @@ import base64
 import time
 import numpy as np
 
-def main():
-    print("=== 1. Testing backend/schemas.py ===")
-    from backend.schemas import AudioChunk, RiskUpdate
+import asyncio
+from backend.schemas import AudioChunk, RiskUpdate, decode_pcm_b64
+from backend.enrollment import enroll_speaker_endpoint, EnrollRequest
+from backend.policy import escalate_policy, freeze_transaction, get_session_risk_endpoint, PolicyActionRequest, update_session_risk
+from backend.alerts import dispatch_alert, AlertRequest
+from backend.main import health_check
 
-    # Synthetic 200ms 440Hz sine wave (3,200 samples @ 16kHz)
+async def run_async_tests():
+    print("=== 1. Testing backend/schemas.py & Requirements ===")
     t = np.linspace(0, 0.2, 3200, endpoint=False, dtype=np.float32)
     synth_audio = 0.4 * np.sin(2 * np.pi * 440.0 * t)
     pcm_bytes = (synth_audio * 32767.0).astype(np.int16).tobytes()
@@ -27,13 +31,17 @@ def main():
         sample_rate=16000,
         duration_ms=200,
         is_speech=True,
-        audio_b64=b64_str
+        audio_b64=b64_str,
+        caller_id="caller_test_001",
+        session_id="sess_test_999"
     )
 
     decoded = chunk.decode_audio()
     print(f"Decoded waveform shape: {decoded.shape}, dtype: {decoded.dtype}")
     assert len(decoded) == 3200, "Decoded sample count must be exactly 3200"
     assert decoded.dtype == np.float32, "Decoded waveform must be float32"
+    assert chunk.caller_id == "caller_test_001"
+    assert chunk.session_id == "sess_test_999"
 
     print("\n=== 2. Testing backend/model_runtime.py ===")
     from backend.model_runtime import aasist_runtime, score_speaker, is_mismatch, SIMILARITY_THRESHOLD
@@ -55,8 +63,13 @@ def main():
     assert is_mismatch(0.70) is True
     assert is_mismatch(0.80) is False
 
-    print("\n=== 3. Testing backend/risk.py ===")
-    from backend.risk import RiskScorer
+    print("\n=== 3. Testing backend/risk.py & Calibrated Threshold ===")
+    from backend.risk import RiskScorer, ACOUSTIC_OPERATING_THRESHOLD, is_acoustic_spoof
+    print(f"ACOUSTIC_OPERATING_THRESHOLD: {ACOUSTIC_OPERATING_THRESHOLD}")
+    assert ACOUSTIC_OPERATING_THRESHOLD == 0.3998
+    assert is_acoustic_spoof(0.40) is True
+    assert is_acoustic_spoof(0.30) is False
+
     scorer = RiskScorer(window_size=5)
 
     risk_score, risk_tier, speaker_mismatch = scorer.score_chunk(res["score_acoustic"], None)
@@ -71,7 +84,112 @@ def main():
     assert mismatch_flag is True
     assert risk_tier_m in ("elevated", "critical")
 
-    print("\n=== SUCCESS: All backend contract checks passed! ===")
+    print("\n=== 4. Testing Enrollment, Policy, Session & Alert Endpoints ===")
+
+    # 4a. Health Check
+    res_health = await health_check()
+    assert res_health["status"] == "ok"
+
+    # 4b. Speaker Enrollment (POST /api/v1/speaker/enroll)
+    t_1s = np.linspace(0, 1.0, 16000, endpoint=False, dtype=np.float32)
+    enroll_audio = 0.3 * np.sin(2 * np.pi * 300.0 * t_1s)
+    enroll_pcm = (enroll_audio * 32767.0).astype(np.int16).tobytes()
+    enroll_b64 = base64.b64encode(enroll_pcm).decode("utf-8")
+
+    try:
+        res_enroll = await enroll_speaker_endpoint(EnrollRequest(
+            caller_id="caller_test_001",
+            audio_b64=enroll_b64
+        ))
+        print(f"Enroll Response: {res_enroll}")
+        assert res_enroll == {"caller_id": "caller_test_001", "enrolled": True}
+    except Exception as e:
+        if "speechbrain" in str(e).lower() or "torch" in str(e).lower() or getattr(e, "status_code", None) == 503:
+            print("SKIPPED: Speaker enrollment test skipped because torch/speechbrain is not installed (expected in CI).")
+        else:
+            raise
+
+    # 4c. Policy Escalation (POST /api/v1/policy/escalate)
+    res_esc = await escalate_policy(PolicyActionRequest(
+        session_id="sess_test_999",
+        risk_tier="elevated"
+    ))
+    print(f"Escalate Response: {res_esc}")
+    assert res_esc["status"] == "step-up auth requested"
+
+    # 4d. Transaction Freeze (POST /api/v1/transaction/freeze)
+    res_freeze = await freeze_transaction(PolicyActionRequest(
+        session_id="sess_test_999",
+        risk_tier="critical"
+    ))
+    print(f"Freeze Response: {res_freeze}")
+    assert res_freeze["status"] == "transaction frozen"
+
+    # 4e. Alert Dispatcher (POST /api/v1/policy/alert)
+    res_alert = await dispatch_alert(AlertRequest(
+        session_id="sess_test_999",
+        risk_tier="critical"
+    ))
+    print(f"Alert Response: {res_alert}")
+    assert res_alert["status"] == "alert dispatched"
+    assert res_alert["sms_sent"] is True
+    assert res_alert["email_sent"] is True
+
+    # 4f. Session Risk Store lookup (GET /api/v1/session/{id}/risk)
+    sample_update = RiskUpdate(
+        chunk_id=1,
+        score_acoustic=0.85,
+        score_speaker=0.92,
+        risk_score=85.0,
+        risk_tier="critical",
+        speaker_mismatch=False,
+        latency_ms=15.2,
+        is_spoof=True
+    )
+    update_session_risk("sess_test_999", sample_update)
+
+    res_sess = await get_session_risk_endpoint("sess_test_999")
+    print(f"Session Risk Response: {res_sess}")
+    assert res_sess.chunk_id == 1
+    assert res_sess.risk_tier == "critical"
+    assert res_sess.is_spoof is True
+
+    # 4g. Session Start endpoint (POST /api/v1/session/start) & initial risk lookup
+    from backend.session import start_session_endpoint, StartSessionRequest
+    start_res = await start_session_endpoint(StartSessionRequest(caller_id="caller_test_001"))
+    print(f"Session Start Response: {start_res}")
+    assert "session_id" in start_res
+    assert start_res["status"] == "started"
+    new_sess_id = start_res["session_id"]
+
+    new_sess_risk = await get_session_risk_endpoint(new_sess_id)
+    print(f"Session Initial Risk Response: {new_sess_risk}")
+    assert new_sess_risk.risk_score == 0.0
+    assert new_sess_risk.risk_tier == "low"
+
+    # 4h. Context weight impact & zero-baseline normalization test
+    scorer_normal = RiskScorer(window_size=5)
+    scorer_max_risk = RiskScorer(window_size=5)
+
+    risk_score_norm, _, _ = scorer_normal.score_chunk(acoustic=0.5, context_weight=0.0)
+    risk_score_max, _, _ = scorer_max_risk.score_chunk(acoustic=0.5, context_weight=1.0)
+    print(f"Context Weight Comparison: normal (0.0)={risk_score_norm} vs max context risk (1.0)={risk_score_max}")
+    assert risk_score_norm < risk_score_max, "Normal call context_weight must produce lower risk score than max context risk call"
+
+    # Verify zero-baseline: normal call with all other scores at 0.0 produces risk_score 0.0 (no +15 baseline boost)
+    scorer_zero = RiskScorer(window_size=5)
+    zero_baseline_score, zero_tier, _ = scorer_zero.score_chunk(acoustic=0.0, speaker=0.0, score_prosody=0.0, context_weight=0.0)
+    print(f"Zero-baseline normal call risk_score: {zero_baseline_score} (tier: {zero_tier})")
+    assert zero_baseline_score == 0.0, f"Normal call with zero risk signals must yield 0.0 risk_score, got {zero_baseline_score}"
+
+    print("\n=== SUCCESS: All backend contract & extended API checks passed! ===")
+
+
+def main():
+    asyncio.run(run_async_tests())
+
+
 
 if __name__ == "__main__":
     main()
+
