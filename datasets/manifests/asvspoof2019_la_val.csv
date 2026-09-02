@@ -1,14 +1,4 @@
 filepath,label,speaker_id,system_id,attack_type,subset,duration_s,key
-datasets/processed/benchmark_audio/LA_0002_000_bonafide.wav,0,LA_0002,-,bonafide,benchmark,4.0,bonafide
-datasets/processed/benchmark_audio/LA_0002_001_spoof.wav,1,LA_0002,A02,Neural TTS (Tacotron2 + WaveRNN),benchmark,4.0,spoof
-datasets/processed/benchmark_audio/LA_0002_002_bonafide.wav,0,LA_0002,-,bonafide,benchmark,4.0,bonafide
-datasets/processed/benchmark_audio/LA_0002_003_spoof.wav,1,LA_0002,A04,Traditional TTS (Unit Selection),benchmark,4.0,spoof
-datasets/processed/benchmark_audio/LA_0002_004_bonafide.wav,0,LA_0002,-,bonafide,benchmark,4.0,bonafide
-datasets/processed/benchmark_audio/LA_0002_005_spoof.wav,1,LA_0002,A06,Voice Conversion (Spectral Transfer),benchmark,4.0,spoof
-datasets/processed/benchmark_audio/LA_0002_006_bonafide.wav,0,LA_0002,-,bonafide,benchmark,4.0,bonafide
-datasets/processed/benchmark_audio/LA_0002_007_spoof.wav,1,LA_0002,A02,Neural TTS (Tacotron2 + WaveRNN),benchmark,4.0,spoof
-datasets/processed/benchmark_audio/LA_0002_008_bonafide.wav,0,LA_0002,-,bonafide,benchmark,4.0,bonafide
-datasets/processed/benchmark_audio/LA_0002_009_spoof.wav,1,LA_0002,A04,Traditional TTS (Unit Selection),benchmark,4.0,spoof
 datasets/processed/benchmark_audio/LA_0010_000_bonafide.wav,0,LA_0010,-,bonafide,benchmark,4.0,bonafide
 datasets/processed/benchmark_audio/LA_0010_001_spoof.wav,1,LA_0010,A02,Neural TTS (Tacotron2 + WaveRNN),benchmark,4.0,spoof
 datasets/processed/benchmark_audio/LA_0010_002_bonafide.wav,0,LA_0010,-,bonafide,benchmark,4.0,bonafide
@@ -19,6 +9,16 @@ datasets/processed/benchmark_audio/LA_0010_006_bonafide.wav,0,LA_0010,-,bonafide
 datasets/processed/benchmark_audio/LA_0010_007_spoof.wav,1,LA_0010,A02,Neural TTS (Tacotron2 + WaveRNN),benchmark,4.0,spoof
 datasets/processed/benchmark_audio/LA_0010_008_bonafide.wav,0,LA_0010,-,bonafide,benchmark,4.0,bonafide
 datasets/processed/benchmark_audio/LA_0010_009_spoof.wav,1,LA_0010,A04,Traditional TTS (Unit Selection),benchmark,4.0,spoof
+datasets/processed/benchmark_audio/LA_0002_000_bonafide.wav,0,LA_0002,-,bonafide,benchmark,4.0,bonafide
+datasets/processed/benchmark_audio/LA_0002_001_spoof.wav,1,LA_0002,A02,Neural TTS (Tacotron2 + WaveRNN),benchmark,4.0,spoof
+datasets/processed/benchmark_audio/LA_0002_002_bonafide.wav,0,LA_0002,-,bonafide,benchmark,4.0,bonafide
+datasets/processed/benchmark_audio/LA_0002_003_spoof.wav,1,LA_0002,A04,Traditional TTS (Unit Selection),benchmark,4.0,spoof
+datasets/processed/benchmark_audio/LA_0002_004_bonafide.wav,0,LA_0002,-,bonafide,benchmark,4.0,bonafide
+datasets/processed/benchmark_audio/LA_0002_005_spoof.wav,1,LA_0002,A06,Voice Conversion (Spectral Transfer),benchmark,4.0,spoof
+datasets/processed/benchmark_audio/LA_0002_006_bonafide.wav,0,LA_0002,-,bonafide,benchmark,4.0,bonafide
+datasets/processed/benchmark_audio/LA_0002_007_spoof.wav,1,LA_0002,A02,Neural TTS (Tacotron2 + WaveRNN),benchmark,4.0,spoof
+datasets/processed/benchmark_audio/LA_0002_008_bonafide.wav,0,LA_0002,-,bonafide,benchmark,4.0,bonafide
+datasets/processed/benchmark_audio/LA_0002_009_spoof.wav,1,LA_0002,A04,Traditional TTS (Unit Selection),benchmark,4.0,spoof
 datasets/processed/benchmark_audio/LA_0008_000_bonafide.wav,0,LA_0008,-,bonafide,benchmark,4.0,bonafide
 datasets/processed/benchmark_audio/LA_0008_001_spoof.wav,1,LA_0008,A02,Neural TTS (Tacotron2 + WaveRNN),benchmark,4.0,spoof
 datasets/processed/benchmark_audio/LA_0008_002_bonafide.wav,0,LA_0008,-,bonafide,benchmark,4.0,bonafide
